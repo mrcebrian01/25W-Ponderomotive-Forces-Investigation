@@ -4,7 +4,7 @@ import plotly.io as pio
 pio.renderers.default='browser'
 
 # visualization variables
-trace = 1
+trace = 0
 
 # field variables
 EMax = 5
@@ -168,7 +168,7 @@ fig = go.Figure(
                      marker=dict(color="red", size=4)),
           go.Scatter(x=[xp[0]], y=[yp],
                      mode=mode,
-                     marker=dict(color="crimson", size=4))])
+                     marker=dict(color="green", size=4))])
 fig.update_layout(width=1200, height=500,
         xaxis=dict(range=[xm, xM], autorange=False, zeroline=False),
         yaxis=dict(range=[ym, yM], autorange=False, zeroline=False),
@@ -186,14 +186,14 @@ fig.update_layout(width=1200, height=500,
 if trace:
     fig.update(frames=[go.Frame(
                             data=[go.Scatter(x=r,y=E[k*NStep,]), go.Scatter(x=gradEx,y=gradE[k*NStep,]), go.Scatter(x=[x[:k*NStep]],y=[y[:k*NStep]/yDownscale]), go.Scatter(x=[x2[:k*NStep]],y=[y2[:k*NStep]/yDownscale]), go.Scatter(x=[x3[:k*NStep]],y=[y3[:k*NStep]/yDownscale]), go.Scatter(x=[xp[:k*NStep]],y=[yp[:k*NStep]])],
-                            traces=[0,1,2,3,4]
+                            traces=[0,1,2,3,4,5]
                             ) # fig.data[1] is updated by each frame
             for k in range(int(N/NStep))])
 
 else:
     fig.update(frames=[go.Frame(
                             data=[go.Scatter(x=r,y=E[k*NStep,]), go.Scatter(x=gradEx,y=gradE[k*NStep,]), go.Scatter(x=[x[k*NStep]],y=[y[k*NStep]/yDownscale]), go.Scatter(x=[x2[k*NStep]],y=[y2[k*NStep]/yDownscale]), go.Scatter(x=[x3[k*NStep]],y=[y3[k*NStep]/yDownscale]), go.Scatter(x=[xp[k*NStep]],y=[yp[k*NStep]])],
-                            traces=[0,1,2,3,4]
+                            traces=[0,1,2,3,4,5]
                             ) # fig.data[1] is updated by each frame
             for k in range(int(N/NStep))])
 
