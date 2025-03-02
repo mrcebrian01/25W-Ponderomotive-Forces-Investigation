@@ -4,7 +4,11 @@ import plotly.io as pio
 pio.renderers.default='browser'
 
 # visualization variables
-trace = 1
+trace = 0
+y1D = 0
+
+# diagnostic plots
+vplot = 1
 
 # field variables
 EMax = 5
@@ -27,16 +31,19 @@ xMax = 5
 timeStep = 4000 #for use in linspace
 xStep = 10000
 yDownscale = 5 # scaling down y so that it appears on the window
-timeIncr = timeMax/timeStep
-xIncr = xMax/xStep
+
+if trace:
+    y1D = 0
+dt = timeMax/timeStep
+dx = xMax/xStep
 N = int(timeStep) #number of frames
-NStep = 8 #this is how we step over frames to reduce runtime generating animations
+NStep = 5 #this is how we step over frames to reduce runtime generating animations
 
 
 def E0(EMax, r, c, std):
     gauss = np.empty_like(r)
     for i in range(np.shape(r)[0]):
-        center = (c*timeIncr*i)+start
+        center = (c*dt*i)+start
         gauss[i,:] = EMax*np.exp(-((r[i,:]-center)**2)/2*std**2)
 #    gauss = np.ones_like(gauss)
     return gauss
@@ -60,6 +67,7 @@ def planeWave(EMax, std, k, w, r, t):
     E_0 = E0(EMax, rr, w/k, std)
     return E_0*np.cos(k*rr-w*tt), E_0
 
+
 def particle(t, E, v_0, x_0, q):
     # Moving particle
     y = 0
@@ -67,19 +75,34 @@ def particle(t, E, v_0, x_0, q):
     vy = 0
     x = np.empty(len(t))
     y = np.zeros(len(t))
+    vxlist = np.zeros(len(t))
+    vylist = np.zeros(len(t))
     x[0] = x_0
     y[0] = 0
+    
+    ## Offsetting v by 0.5 dt for leapfrog method
+    E_interp = np.interp(x[0], r, E[0, :])
+    B_interp = np.interp(x[0], r, E[0, :]) / mue_0
+    
+    aE = (q/m) * E_interp
+    vy += 0.5 * aE * dt
+    
+    B = np.array([0, 0, B_interp])
+    v = np.array([vx, vy, 0])
+    aB = (q/m)*np.cross(v, B)
+     
+    ax = aB[0]
+    ay = aB[1]
+    
+    vy += 0.5*(ay*dt) #v=at
+    vx += 0.5*(ax*dt)
+    
+            
     for i in range(len(t)-1):
-        if(x[i]>xMax):
-           ay=0
-           vy=0
-           ax=0
-           vx=0
-        else:
-            E_interp = np.interp(x[i], r, E[i, :])  
-            ay = (q/m) * E_interp
+        if(x[i]<=xMax):
+            E_interp = np.interp(x[i], r, E[i, :])
             B = np.interp(x[i], r, E[i, :]) / mue_0
-#            B = E[i,int(x[i]/xIncr)]/mue_0
+            ay = (q/m) * E_interp
             
             v = np.array([vx, vy, 0])
             B = np.array([0, 0, B])
@@ -87,13 +110,22 @@ def particle(t, E, v_0, x_0, q):
             ax = a[0]
             ay = ay + a[1]
             
-            vy = vy + (ay*(timeIncr)) #v=at
-            vx = vx + (ax*(timeIncr))
-        y[i+1] = y[i]+(vy*(timeIncr))
-        x[i+1] = x[i]+(vx*(timeIncr))
+            vy = vy + (ay*dt) #v=at
+            vx = vx + (ax*dt)
+            if vx!=0 and vy!=0:
+                vylist[i+1] = vy
+                vxlist[i+1] = vx
+        else:
+            vxlist = vxlist[:i]
+            vylist = vylist[:i]
+        y[i+1] = y[i]+(vy*dt)
+        x[i+1] = x[i]+(vx*dt)
+        
     print(x[i+1])
     print(y[i+1])
-    return x, y
+    if y1D:
+        y = np.zeros_like(y)
+    return x, y, vxlist, vylist
 
 def ponderomotiveParticle(t, E, v_0, x_0, E_0):
     # Moving particle ponderomotive
@@ -106,17 +138,17 @@ def ponderomotiveParticle(t, E, v_0, x_0, E_0):
     
     gradE = np.zeros_like(E_0)
     for i in range(len(t)):
-        gradE[i,:] = np.gradient(np.power(E_0[i,:], 2))*(1/xIncr)
+        gradE[i,:] = np.gradient(np.power(E_0[i,:], 2))*(1/dx)
 
     for i in range(len(t)-1):
         if(xp[i]>xMax):
            ap=0
            vp=0
         else:
-           ap = -((q**2)/(4.0 * w**2.0 * m**2.0))* gradE[i,int(xp[i]/xIncr)]/1000 #a=qE/m
-           vp = vp + ap*(timeIncr) #v=at
+           ap = -((q**2)/(4.0 * w**2.0 * m**2.0))* gradE[i,int(xp[i]/dx)]/1000 #a=qE/m
+           vp = vp + ap*(dt) #v=at
            yp[i] = 0
-        xp[i+1] = xp[i] + vp*(timeIncr)
+        xp[i+1] = xp[i] + vp*(dt)
     print(xp[i+1])
     return xp, yp, gradE
 
@@ -127,9 +159,9 @@ E, E_0 = planeWave(EMax, std, k, w, r, t)
 print(np.size(E))
 
 # Creating and tracing particles
-x, y = particle(t, E, v_0, x_0,q)
-x2, y2 = particle(t, E, v_0, x_0,q-0.1)
-x3, y3 = particle(t, E, v_0, x_0,q+0.1)
+x, y, vx, vy = particle(t, E, v_0, x_0,q)
+x2, y2, vx2, vy2 = particle(t, E, v_0, x_0,q-0.1)
+x3, y3, vx3, vy3 = particle(t, E, v_0, x_0,q+0.1)
 xp, yp, gradE = ponderomotiveParticle(t, E, v_0, x_0, E_0)
 gradEx = r[::NStep]
 gradE = gradE[:,::NStep]
@@ -147,9 +179,41 @@ xM = np.max(r)
 ym = np.min(E)*wDownscale
 yM = np.max(E)*wDownscale
 
+# Velocity window domain
+vxm = np.min(vx)
+vxM = np.max(vx)
+vym = np.min(vy)
+vyM = np.max(vy)
 
+print(int((min(len(vx),len(vy))/NStep))-2)
+print(len(vx))
 
 #####Graphing######
+if vplot:
+    vfig = go.Figure(
+        data=[go.Scatter(x=vx[:], y=vy[:],
+            mode="lines",
+            line=dict(width=2, color="navy"))])
+    vfig.update_layout(width=800, height=800,
+            xaxis=dict(range=[vxm, vxM], autorange=False, zeroline=False),
+            yaxis=dict(range=[vym, vyM], autorange=False, zeroline=False),
+            title_text="Plane Wave Ponderomotive Forces Velocity", title_x=0.5,
+            updatemenus = [dict(type = "buttons",
+            buttons = [
+                dict(
+                    args = [None, {"frame": {"duration": 10, "redraw": False},
+                                    "fromcurrent": True, "transition": {"duration": 10}}],
+                    label = "Play",
+                    method = "animate",
+    
+                    )])])
+    vfig.update(frames=[go.Frame(
+                            data=[go.Scatter(x=vx[:(k+1)*NStep],y=vy[:(k+1)*NStep])],
+                            traces=[0]
+                            ) # fig.data[1] is updated by each frame
+            for k in range(int((min(len(vx),len(vy))/NStep))-2)])
+    vfig.show()
+
 if trace:
     mode = 'lines'
     fig = go.Figure(
@@ -162,12 +226,12 @@ if trace:
               go.Scatter(x=x[:], y=y[:],
                          mode=mode,
                          line=dict(width=2, color="red")),
-              go.Scatter(x=x2[:], y=[y2[:]],
+              go.Scatter(x=x2[:], y=y2[:],
                          mode=mode,
-                         line=dict(width=2, color="red")),
+                         line=dict(width=2, color="crimson")),
               go.Scatter(x=x3[:], y=y3[:],
                          mode=mode,
-                         line=dict(width=2, color="red")),
+                         line=dict(width=2, color="crimson")),
               go.Scatter(x=xp[:], y=yp[:],
                          mode=mode,
                          line=dict(width=2, color="green"))])
@@ -185,17 +249,17 @@ else:
                          marker=dict(color="red", size=4)),
               go.Scatter(x=[x2[0]], y=[y2[0]],
                          mode=mode,
-                         marker=dict(color="red", size=4)),
+                         marker=dict(color="crimson", size=4)),
               go.Scatter(x=[x3[0]], y=[y3[0]],
                          mode=mode,
-                         marker=dict(color="red", size=4)),
+                         marker=dict(color="crimson", size=4)),
               go.Scatter(x=[xp[0]], y=[yp],
                          mode=mode,
                          marker=dict(color="green", size=4))])
 fig.update_layout(width=1200, height=500,
         xaxis=dict(range=[xm, xM], autorange=False, zeroline=False),
         yaxis=dict(range=[ym, yM], autorange=False, zeroline=False),
-        title_text="Plane Wave Pondermotive Forces", title_x=0.5,
+        title_text="Plane Wave Ponderomotive Forces", title_x=0.5,
         updatemenus = [dict(type = "buttons",
         buttons = [
             dict(
@@ -208,7 +272,7 @@ fig.update_layout(width=1200, height=500,
 
 if trace:
     fig.update(frames=[go.Frame(
-                            data=[go.Scatter(x=r,y=E[k*NStep,]), go.Scatter(x=gradEx,y=gradE[k*NStep,]), go.Scatter(x=x[:k*NStep],y=y[:k*NStep]/yDownscale), go.Scatter(x=x2[:k*NStep],y=y2[:k*NStep]/yDownscale), go.Scatter(x=[x3[:k*NStep]],y=y3[:k*NStep]/yDownscale), go.Scatter(x=xp[:k*NStep],y=yp[:k*NStep])],
+                            data=[go.Scatter(x=r,y=E[k*NStep,]), go.Scatter(x=gradEx,y=gradE[k*NStep,]), go.Scatter(x=x[:k*NStep],y=y[:k*NStep]/yDownscale), go.Scatter(x=x2[:k*NStep],y=y2[:k*NStep]/yDownscale), go.Scatter(x=x3[:k*NStep],y=y3[:k*NStep]/yDownscale), go.Scatter(x=xp[:k*NStep],y=yp[:k*NStep])],
                             traces=[0,1,2,3,4,5]
                             ) # fig.data[1] is updated by each frame
             for k in range(int(N/NStep))])
