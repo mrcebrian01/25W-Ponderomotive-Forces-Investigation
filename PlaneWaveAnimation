@@ -4,19 +4,19 @@ import plotly.io as pio
 pio.renderers.default='browser'
 
 # visualization variables
-trace = 0
+trace = 1
 y1D = 0
 
 # diagnostic plots
 vplot = 1
 
 # field variables
-EMax = 5
+EMax = 30
 std = 0.3
 start = -1/std**2
+c = 1
 k = 10
-w = 0.5
-mue_0 = 376.73431
+w = k*c
 
 # particle variables
 m = 1
@@ -26,18 +26,19 @@ x_0 = 1
 
 # computation variables
 N = 5000 #number of frames max=1000
-timeMax = 200
-xMax = 5
-timeStep = 4000 #for use in linspace
-xStep = 10000
-yDownscale = 5 # scaling down y so that it appears on the window
+timeMax = 10 # timeMax*c = 2xMax
+xMax = 5 # xMax = c/2 * timeMax
+xSteps = 2000
+yDownscale = 1 # scaling down y so that it appears on the window
+Cmax = 0.5
+NStep = 10 #this is how we step over frames to reduce runtime generating animations
 
 if trace:
     y1D = 0
-dt = timeMax/timeStep
-dx = xMax/xStep
-N = int(timeStep) #number of frames
-NStep = 5 #this is how we step over frames to reduce runtime generating animations
+dx = xMax/xSteps
+dt = (Cmax*dx) # dt = 0.5*dx
+timeSteps = int(timeMax/dt) #for use in linspace
+N = (timeSteps) #number of frames
 
 
 def E0(EMax, r, c, std):
@@ -70,61 +71,74 @@ def planeWave(EMax, std, k, w, r, t):
 
 def particle(t, E, v_0, x_0, q):
     # Moving particle
-    y = 0
-    vx = v_0
-    vy = 0
     x = np.empty(len(t))
     y = np.zeros(len(t))
-    vxlist = np.zeros(len(t))
-    vylist = np.zeros(len(t))
+    vx = np.zeros(len(t))
+    vy = np.zeros(len(t))
+    
     x[0] = x_0
     y[0] = 0
+    vx[0] = v_0
+    vy[0] = 0
     
-    ## Offsetting v by 0.5 dt for leapfrog method
-    E_interp = np.interp(x[0], r, E[0, :])
-    B_interp = np.interp(x[0], r, E[0, :]) / mue_0
-    
+    ## Offsetting v by -0.5 dt for leapfrog method only using E field
+    E_interp = np.interp(x[0], r, E[0, :])    
     aE = (q/m) * E_interp
-    vy += 0.5 * aE * dt
-    
-    B = np.array([0, 0, B_interp])
-    v = np.array([vx, vy, 0])
-    aB = (q/m)*np.cross(v, B)
-     
-    ax = aB[0]
-    ay = aB[1]
-    
-    vy += 0.5*(ay*dt) #v=at
-    vx += 0.5*(ax*dt)
-    
+    vy[0] -= 0.5 * aE * dt
             
+    flag = 1
     for i in range(len(t)-1):
         if(x[i]<=xMax):
-            E_interp = np.interp(x[i], r, E[i, :])
-            B = np.interp(x[i], r, E[i, :]) / mue_0
-            ay = (q/m) * E_interp
             
-            v = np.array([vx, vy, 0])
+            # Finding field at full steps
+            E_interp = np.interp(x[i], r, E[i, :])
+            B = np.interp(x[i], r, E[i, :]) / c
+            
+            # Computing electric field acceleration
+            aE = (q/m) * E_interp
+            
+            # Computing B field acceleration
+            v = np.array([vx[i], vy[i], 0])
             B = np.array([0, 0, B])
             a = (q/m)*np.cross(v, B)
-            ax = a[0]
-            ay = ay + a[1]
             
-            vy = vy + (ay*dt) #v=at
-            vx = vx + (ax*dt)
-            if vx!=0 and vy!=0:
-                vylist[i+1] = vy
-                vxlist[i+1] = vx
+            # Putting E and B together for x and y accelerations at full steps
+            ax = a[0]
+            ay = aE + a[1]
+            
+            # Pushing velocity a half-step
+            vxHalf = vx[i] + 0.5*(ax*dt)
+            vyHalf = vy[i] + 0.5*(ay*dt) #v=at
+            
+            # Pushing position a full step
+            x[i+1] = x[i]+(vxHalf*dt)
+            y[i+1] = y[i]+(vyHalf*dt)
+            
+            # Pushing velocity another half-step so that v and r are both at a full step at the end of each loop
+            vx[i+1] = vxHalf + 0.5*(ax*dt)
+            vy[i+1] = vyHalf + 0.5*(ay*dt)
+            
+            if i==len(t)-2:
+                vxlist = vx[:i]
+                vylist = vy[:i]
+            
         else:
-            vxlist = vxlist[:i]
-            vylist = vylist[:i]
-        y[i+1] = y[i]+(vy*dt)
-        x[i+1] = x[i]+(vx*dt)
+            
+            # If the particle goes off the screen, we want to truncate all other velocities and pin the particle to avoid errors in interp
+            x[i+1] = x[i]
+            y[i+1] = y[i]
+            
+            if flag: 
+                vxlist = vx[:i]
+                vylist = vy[:i]
+                flag = 0
         
     print(x[i+1])
     print(y[i+1])
+    
     if y1D:
         y = np.zeros_like(y)
+    
     return x, y, vxlist, vylist
 
 def ponderomotiveParticle(t, E, v_0, x_0, E_0):
@@ -145,7 +159,7 @@ def ponderomotiveParticle(t, E, v_0, x_0, E_0):
            ap=0
            vp=0
         else:
-           ap = -((q**2)/(4.0 * w**2.0 * m**2.0))* gradE[i,int(xp[i]/dx)]/1000 #a=qE/m
+           ap = -((q**2)/(4.0 * w**2.0 * m**2.0))* gradE[i,int(xp[i]/dx)] #a=qE/m
            vp = vp + ap*(dt) #v=at
            yp[i] = 0
         xp[i+1] = xp[i] + vp*(dt)
@@ -153,8 +167,8 @@ def ponderomotiveParticle(t, E, v_0, x_0, E_0):
     return xp, yp, gradE
 
 #tt = np.linspace(0, timeMax, compStep)
-t = np.linspace(0, timeMax, timeStep)
-r = np.linspace(0, xMax, xStep)
+t = np.linspace(0, timeMax, timeSteps)
+r = np.linspace(0, xMax, xSteps)
 E, E_0 = planeWave(EMax, std, k, w, r, t)
 print(np.size(E))
 
@@ -173,7 +187,12 @@ gradE = gradE[:,::NStep]
 #yy = s - s ** 2
 
 # Setting window domain
-wDownscale = 10 # scaling down y so that it appears on the form
+wDownscale = 1 # scaling down y so that it appears on the form
+E = E*(1/np.max(np.abs(E)))
+gradE = gradE*(1/np.max(np.abs(gradE)))
+print(np.max(np.abs(gradE)))
+print(np.max(abs(E)))
+print('hello')
 xm = np.min(r)
 xM = np.max(r)
 ym = np.min(E)*wDownscale
@@ -234,7 +253,19 @@ if trace:
                          line=dict(width=2, color="crimson")),
               go.Scatter(x=xp[:], y=yp[:],
                          mode=mode,
-                         line=dict(width=2, color="green"))])
+                         line=dict(width=2, color="green")),
+              go.Scatter(x=[x[0]], y=[0],
+                         mode='markers',
+                         marker=dict(color="red", size=8)),
+              go.Scatter(x=[x2[0]], y=[0],
+                         mode='markers',
+                         marker=dict(color="crimson", size=8)),
+              go.Scatter(x=[x3[0]], y=[0],
+                         mode='markers',
+                         marker=dict(color="crimson", size=8)),
+              go.Scatter(x=[xp[0]], y=[yp],
+                         mode='markers',
+                         marker=dict(color="green", size=8))])
 else:
     mode = 'markers'
     fig = go.Figure(
@@ -272,8 +303,8 @@ fig.update_layout(width=1200, height=500,
 
 if trace:
     fig.update(frames=[go.Frame(
-                            data=[go.Scatter(x=r,y=E[k*NStep,]), go.Scatter(x=gradEx,y=gradE[k*NStep,]), go.Scatter(x=x[:k*NStep],y=y[:k*NStep]/yDownscale), go.Scatter(x=x2[:k*NStep],y=y2[:k*NStep]/yDownscale), go.Scatter(x=x3[:k*NStep],y=y3[:k*NStep]/yDownscale), go.Scatter(x=xp[:k*NStep],y=yp[:k*NStep])],
-                            traces=[0,1,2,3,4,5]
+                            data=[go.Scatter(x=r,y=E[k*NStep,]), go.Scatter(x=gradEx,y=gradE[k*NStep,]), go.Scatter(x=x[:k*NStep],y=y[:k*NStep]/yDownscale), go.Scatter(x=x2[:k*NStep],y=y2[:k*NStep]/yDownscale), go.Scatter(x=x3[:k*NStep],y=y3[:k*NStep]/yDownscale), go.Scatter(x=xp[:k*NStep],y=yp[:k*NStep]), go.Scatter(x=[x[k*NStep]],y=[0/yDownscale]), go.Scatter(x=[x2[k*NStep]],y=[0/yDownscale]), go.Scatter(x=[x3[k*NStep]],y=[0/yDownscale]), go.Scatter(x=[xp[k*NStep]],y=[yp[k*NStep]])],
+                            traces=[0,1,2,3,4,5,6,7,8,9]
                             ) # fig.data[1] is updated by each frame
             for k in range(int(N/NStep))])
 
